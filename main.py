@@ -131,9 +131,88 @@ def warped():
     return Perspective matrix
     Currently, The points for perspective are chosed manually.
     '''
+    src = np.float32([[584, 455], [700, 455], [1052, 675], [268, 675]])
+    dst = np.float32([[320, 0], [960, 0], [950, 720], [320, 720]])
+    M = cv2.getPerspectiveTransform(src, dst)
+    return M
 
 
 # Detect lane lines
+def sliding_window_search(img, window_width=50, window_height=80, margin=100):
+    '''
+    Apply convolution to do sliding window search
+    '''
+    # Use convolution to find window centroids
+    window_centroids = find_window_centroids(img, window_width, window_height, margin)
+    # If found any window centers
+    if len(window_centroids) > 0:
+        # Points use to draw all the left and right windows
+        l_points = np.zeros_like(img)
+        r_points = np.zeros_like(img)
+
+        # Go through each level and draw the windows
+        for level in range(0, len(window_centroids)):
+            # Window_mask is a function to draw window areas
+            l_mask = window_mask(window_width, window_height, img, window_centroids[level][0], level)
+            r_mask = window_mask(window_width, window_height, img, window_centroids[level][1], level)
+            # Add graphic points from window mask here to total pixels found
+            l_points[(l_points == 255) | ((l_mask == 1) )] = 255
+            r_points[(r_points == 255) | ((r_mask == 1) )] = 255
+
+        # Draw the results
+        template = np.array(r_points + l_points, np.uint8) # add both left and right window pixels togther
+        #l_template = np.array(l_points, np.uint8) # add both left and right window pixels togther
+        #r_template = np.array(r_points, np.uint8) # add both left and right window pixels togther
+        zero_channel = np.zeros_like(template) # create a zero color channel
+        template = np.array(cv2.merge((zero_channel,template,zero_channel)),np.uint8) # make window pixels green
+        #template = np.array(cv2.merge((l_template,zero_channel, r_template)),np.uint8) # make window pixels green
+        warpage = np.array(cv2.merge((img,img,img)),np.uint8) # making the original road pixels 3 color channels
+        output = cv2.addWeighted(warpage, 1, template, 0.5, 0.0) # overlay the orignal road image with window results
+    return output, l_points, r_points
+
+
+def window_mask(width, height, img_ref, center,level):
+    output = np.zeros_like(img_ref)
+    output[int(img_ref.shape[0]-(level+1)*height):int(img_ref.shape[0]-level*height),max(0,int(center-width/2)):min(int(center+width/2),img_ref.shape[1])] = 1
+    return output
+
+
+def find_window_centroids(image, window_width, window_height, margin):
+
+    window_centroids = [] # Store the (left,right) window centroid positions per level
+    window = np.ones(window_width) # Create our window template that we will use for convolutions
+
+    # First find the two starting positions for the left and right lane by using np.sum to get the vertical image slice
+    # and then np.convolve the vertical image slice with the window template
+
+    # Sum quarter bottom of image to get slice, could use a different ratio
+    l_sum = np.sum(warped[int(3*warped.shape[0]/4):,:int(warped.shape[1]/2)], axis=0)
+    l_center = np.argmax(np.convolve(window,l_sum))-window_width/2
+    r_sum = np.sum(warped[int(3*warped.shape[0]/4):,int(warped.shape[1]/2):], axis=0)
+    r_center = np.argmax(np.convolve(window,r_sum))-window_width/2+int(warped.shape[1]/2)
+
+    # Add what we found for the first layer
+    window_centroids.append((l_center,r_center))
+
+    # Go through each layer looking for max pixel locations
+    for level in range(1,(int)(warped.shape[0]/window_height)):
+        # convolve the window into the vertical slice of the image
+        image_layer = np.sum(warped[int(warped.shape[0]-(level+1)*window_height):int(warped.shape[0]-level*window_height),:], axis=0)
+        conv_signal = np.convolve(window, image_layer)
+        # Find the best left centroid by using past left center as a reference
+        # Use window_width/2 as offset because convolution signal reference is at right side of window, not center of window
+        offset = window_width/2
+        l_min_index = int(max(l_center+offset-margin,0))
+        l_max_index = int(min(l_center+offset+margin,warped.shape[1]))
+        l_center = np.argmax(conv_signal[l_min_index:l_max_index])+l_min_index-offset
+        # Find the best right centroid by using past right center as a reference
+        r_min_index = int(max(r_center+offset-margin,0))
+        r_max_index = int(min(r_center+offset+margin,warped.shape[1]))
+        r_center = np.argmax(conv_signal[r_min_index:r_max_index])+r_min_index-offset
+        # Add what we found for that layer
+        window_centroids.append((l_center,r_center))
+
+    return window_centroids
 
 
 # Determine the lane curvature
@@ -145,5 +224,90 @@ if __name__ == '__main__':
     if int(args.calibrate) == 1:
         calib()
     else:
+        # load camera parametes (mtx, dist)
+        mtx, dist = [] ,[]
+        with open('./camera_cal/wide_dist_pickle.p', 'rb') as f:
+            data = pickle.load(f)
+            mtx, dist = data['mtx'], data['dist']
+        # add matrix for perspective transform
+        M = warped()
+
+        # read images and processing
+        test_images = glob.glob('./test_images/test5.jpg')
+        #print(test_images[-1])
+        for ind, fn in enumerate(test_images):
+            img = cv2.imread(fn)
+            img_size = (img.shape[1], img.shape[0])
+            # undistort image before any preprocessing
+            undist = cv2.undistort(img, mtx, dist, None, mtx)
+            undist = cv2.GaussianBlur(undist, (3,3), 0)
+            # color/grdient threshold
+            thresh_bin = thresh_pipeline(undist)
+            # Perspective transform to get bird-eyes view
+            warped = cv2.warpPerspective(thresh_bin, M, img_size, flags=cv2.INTER_LINEAR)
+            # find lane by sliding window
+            lane_img, leftx, rightx = sliding_window_search(warped*255)
+            plt.subplot(221), plt.imshow(undist)
+            plt.subplot(222), plt.imshow(thresh_bin, cmap='gray')
+            plt.subplot(223), plt.imshow(warped, cmap='gray')
+            plt.subplot(224), plt.imshow(lane_img)
+            plt.show()
+            #plt.imshow(warped, cmap='gray')
+            #plt.show()
+            #cv2.imwrite('./warp2.png', warped)
+
+            ploty = np.linspace(0, 719, num=720)# to cover same y-range as image
+            #leftx = leftx[::-1]
+            #rightx = rightx[::-1]
+            print(type(leftx))
+            print(leftx.shape)
+            #print(np.transpose(np.nonzero(leftx)))
+
+            leftx = np.transpose(np.nonzero(leftx))
+            print(leftx[:,0].shape)
+            print(leftx[:,1].shape)
+            rightx = np.transpose(np.nonzero(rightx))
+
+
+            # Fit a second order polynomial to pixel positions in each fake lane line
+            #left_fit = np.polyfit(ploty, leftx, 2)
+            left_fit = np.polyfit(leftx[:,0], leftx[:,1], 2)
+            left_fitx = left_fit[0]*ploty**2 + left_fit[1]*ploty + left_fit[2]
+            #right_fit = np.polyfit(ploty, rightx, 2)
+            right_fit = np.polyfit(rightx[:,0], rightx[:,1], 2)
+            right_fitx = right_fit[0]*ploty**2 + right_fit[1]*ploty + right_fit[2]
+
+            # Plot up the fake data
+            mark_size = 3
+            #plt.plot(leftx, ploty, 'o', color='red', markersize=mark_size)
+            plt.plot(leftx[:,1], leftx[:,0], 'o', color='red', markersize=mark_size)
+            #plt.plot(rightx, ploty, 'o', color='blue', markersize=mark_size)
+            plt.plot(rightx[:,1], rightx[:,0], 'o', color='blue', markersize=mark_size)
+            plt.xlim(0, 1280)
+            plt.ylim(0, 720)
+            plt.plot(left_fitx, ploty, color='green', linewidth=3)
+            plt.plot(right_fitx, ploty, color='green', linewidth=3)
+            plt.gca().invert_yaxis() # to visualize as we do the images
+            plt.show()
+            #left_fit = np.polyfit(ploty, leftx, 2)
+            #right_fit = np.polyfit(ploty, rightx, 2)
+
+
+
+
         print("nothing now")
     pass
+
+
+
+        #cap = cv2.VideoCapture()
+        #cap.open(args.file)
+        #if(not cap.isOpened()):
+        #    print("could not open the file!")
+        #while(1):
+        #    ret, frame = cap.read()
+
+        #    cv2.imshow('play',frame)
+        #    k = cv2.waitKey(30) & 0xff
+        #    if k == 27:
+        #        break

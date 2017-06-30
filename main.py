@@ -92,7 +92,7 @@ def calib(fold='./camera_cal/', nx=9, ny=6):
 
 
 # Color/gradient threshold
-def thresh_pipeline(img, s_thresh=(140, 255), sx_thresh=(20, 100)):
+def thresh_pipeline(img, s_thresh=(180, 250), sx_thresh=(20, 100)):
     '''
     work on undistorted image
     '''
@@ -167,7 +167,8 @@ if __name__ == '__main__':
             undist = cv2.undistort(img, mtx, dist, None, mtx)
             undist = cv2.GaussianBlur(undist, (3,3), 0)
             # color/grdient threshold
-            thresh_bin = thresh_pipeline(undist)
+            thresh_bin = thresh_pipeline(undist, s_thresh=(190, 250), sx_thresh=(20, 100))
+
             # Perspective transform to get bird-eyes view
             warped = cv2.warpPerspective(thresh_bin, M, img_size, flags=cv2.INTER_LINEAR)
             # find lane by sliding window

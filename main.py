@@ -135,13 +135,76 @@ def warped():
     src = np.float32([[584, 455], [700, 455], [1052, 675], [268, 675]])
     dst = np.float32([[320, 0], [960, 0], [950, 720], [320, 720]])
     M = cv2.getPerspectiveTransform(src, dst)
-    return M
+    Minv = cv2.getPerspectiveTransform(dst, src)
+    return M, Minv
 
 
 # Detect lane lines
 # seprate lane detecting functions into detect_lanes.py
 
 # Determine the lane curvature
+def measure_curvature(leftx, rightx, y_len=720):
+    # Fit a second order polynomial to pixel positions in each fake lane line
+    ploty = np.linspace(0, y_len-1, num=y_len)# to cover same y-range as image
+    #left_fit = np.polyfit(ploty, leftx, 2)
+    left_fit = np.polyfit(leftx[:,0], leftx[:,1], 2)
+    left_fitx = left_fit[0]*ploty**2 + left_fit[1]*ploty + left_fit[2]
+    #right_fit = np.polyfit(ploty, rightx, 2)
+    right_fit = np.polyfit(rightx[:,0], rightx[:,1], 2)
+    right_fitx = right_fit[0]*ploty**2 + right_fit[1]*ploty + right_fit[2]
+
+
+    # Calculate the radius of curvature
+    y_eval = np.max(ploty)
+    print('y_eval:{}', y_eval)
+    left_curverad = ((1 + (2*left_fit[0]*y_eval + left_fit[1])**2)**1.5) / np.absolute(2*left_fit[0])
+    right_curverad = ((1 + (2*right_fit[0]*y_eval + right_fit[1])**2)**1.5) / np.absolute(2*right_fit[0])
+    print(left_curverad, right_curverad)
+
+
+    # Define conversions in x and y from pixels space to meters
+    ym_per_pix = 30/720 # meters per pixel in y dimension
+    xm_per_pix = 3.7/700 # meters per pixel in x dimension
+
+    # Fit new polynomials to x,y in world space
+    left_fit_cr = np.polyfit(leftx[:,0]*ym_per_pix, leftx[:,1]*xm_per_pix, 2)
+    right_fit_cr = np.polyfit(rightx[:,0]*ym_per_pix, rightx[:,1]*xm_per_pix, 2)
+    # Calculate the new radii of curvature
+    left_curverad = ((1 + (2*left_fit_cr[0]*y_eval*ym_per_pix + left_fit_cr[1])**2)**1.5) / np.absolute(2*left_fit_cr[0])
+    right_curverad = ((1 + (2*right_fit_cr[0]*y_eval*ym_per_pix + right_fit_cr[1])**2)**1.5) / np.absolute(2*right_fit_cr[0])
+    # Now our radius of curvature is in meters
+    print(left_curverad, 'm', right_curverad, 'm')
+
+    return left_fitx, right_fitx, left_curverad, right_curverad
+
+
+def visualize_output(undist, warped, Minv, left_fitx, right_fitx, ploty, ave_curv, base_pos):
+    warp_zero = np.zeros_like(warped).astype(np.uint8)
+    color_warp = np.dstack((warp_zero, warp_zero, warp_zero))
+
+    # Recast the x and y points into usable format for cv2.fillPoly()
+    pts_left = np.array([np.transpose(np.vstack([left_fitx, ploty]))])
+    pts_right = np.array([np.flipud(np.transpose(np.vstack([right_fitx, ploty])))])
+    pts = np.hstack((pts_left, pts_right))
+
+    # Draw the lane onto the warped blank image
+    cv2.fillPoly(color_warp, np.int_([pts]), (0,255, 0))
+
+    # Warp the blank back to original image space using inverse perspective matrix (Minv)
+    newwarp = cv2.warpPerspective(color_warp, Minv, img_size)
+    # Combine the result with the original image
+    result = cv2.addWeighted(undist, 1, newwarp, 0.3, 0)
+    # put text on image
+    curv_str = 'Radius of Curvature = {:.3f}(m)'.format(ave_curv)
+    pos_str = ''
+    if base_pos <= 0:
+        pos_str = 'Vehicle is {:.3f}m left of center'.format(abs(base_pos))
+    else:
+        pos_str = 'Vehicle is {:.3f}m right of center'.format(abs(base_pos))
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    cv2.putText(result, curv_str, (50,50), font, 2, (255,255,255), 2, cv2.LINE_AA)
+    cv2.putText(result, pos_str, (50, 100), font, 2, (255,255,255), 2, cv2.LINE_AA)
+    return result
 
 
 if __name__ == '__main__':
@@ -155,34 +218,33 @@ if __name__ == '__main__':
             data = pickle.load(f)
             mtx, dist = data['mtx'], data['dist']
         # add matrix for perspective transform
-        M = warped()
+        M, Minv = warped()
 
         # read images and processing
         test_images = glob.glob('./test_images/test5.jpg')
-        #print(test_images[-1])
         for ind, fn in enumerate(test_images):
             img = cv2.imread(fn)
             img_size = (img.shape[1], img.shape[0])
+
             # undistort image before any preprocessing
             undist = cv2.undistort(img, mtx, dist, None, mtx)
             undist = cv2.GaussianBlur(undist, (3,3), 0)
+
             # color/grdient threshold
             thresh_bin = thresh_pipeline(undist, s_thresh=(190, 250), sx_thresh=(20, 100))
 
             # Perspective transform to get bird-eyes view
             warped = cv2.warpPerspective(thresh_bin, M, img_size, flags=cv2.INTER_LINEAR)
+
             # find lane by sliding window
             lane_img, leftx, rightx = sliding_window_search(warped*255)
-            plt.subplot(221), plt.imshow(undist)
+
+            plt.subplot(221), plt.imshow(undist[:,:,::-1])
             plt.subplot(222), plt.imshow(thresh_bin, cmap='gray')
             plt.subplot(223), plt.imshow(warped, cmap='gray')
             plt.subplot(224), plt.imshow(lane_img)
             plt.show()
-            #plt.imshow(warped, cmap='gray')
-            #plt.show()
-            #cv2.imwrite('./warp2.png', warped)
 
-            ploty = np.linspace(0, 719, num=720)# to cover same y-range as image
             #leftx = leftx[::-1]
             #rightx = rightx[::-1]
             print(type(leftx))
@@ -195,45 +257,37 @@ if __name__ == '__main__':
             rightx = np.transpose(np.nonzero(rightx))
 
 
-            # Fit a second order polynomial to pixel positions in each fake lane line
-            #left_fit = np.polyfit(ploty, leftx, 2)
-            left_fit = np.polyfit(leftx[:,0], leftx[:,1], 2)
-            left_fitx = left_fit[0]*ploty**2 + left_fit[1]*ploty + left_fit[2]
-            #right_fit = np.polyfit(ploty, rightx, 2)
-            right_fit = np.polyfit(rightx[:,0], rightx[:,1], 2)
-            right_fitx = right_fit[0]*ploty**2 + right_fit[1]*ploty + right_fit[2]
+            # Measure curvature (wrap into a funtion)
+            left_fitx, right_fitx, left_curverad, right_curverad = measure_curvature(leftx, rightx, y_len=img_size[1])
 
-            # Plot up the fake data
+            ave_curv = (left_curverad + right_curverad) / 2.0                  # unit: m
+            base_pos = ((right_fitx[-1] + left_fitx[-1])/2. - 640) * (3.7/700) # unit: m
+            ploty = np.linspace(0, img_size[1]-1, num=img_size[1])# to cover same y-range as image
+
+
+            # Plot up the data
             mark_size = 3
-            #plt.plot(leftx, ploty, 'o', color='red', markersize=mark_size)
             plt.plot(leftx[:,1], leftx[:,0], 'o', color='red', markersize=mark_size)
-            #plt.plot(rightx, ploty, 'o', color='blue', markersize=mark_size)
             plt.plot(rightx[:,1], rightx[:,0], 'o', color='blue', markersize=mark_size)
             plt.xlim(0, 1280)
             plt.ylim(0, 720)
             plt.plot(left_fitx, ploty, color='green', linewidth=3)
             plt.plot(right_fitx, ploty, color='green', linewidth=3)
             plt.gca().invert_yaxis() # to visualize as we do the images
+            plt.text(400, 100, 'left_cur:{:.3f}, right_cur:{:.3f}'.format(left_curverad, right_curverad))
             plt.show()
-            #left_fit = np.polyfit(ploty, leftx, 2)
-            #right_fit = np.polyfit(ploty, rightx, 2)
 
 
+            # Create an image to draw the lines on
+            result = visualize_output(undist, warped, Minv, left_fitx, right_fitx, ploty, ave_curv, base_pos)
+            #cv2.imshow('result', result)
+            #cv2.waitKey(2000)
+            cv2.imwrite('result.png', result)
+            plt.imshow(result[:,:,::-1])
+            plt.show()
 
 
         print("nothing now")
     pass
 
 
-
-        #cap = cv2.VideoCapture()
-        #cap.open(args.file)
-        #if(not cap.isOpened()):
-        #    print("could not open the file!")
-        #while(1):
-        #    ret, frame = cap.read()
-
-        #    cv2.imshow('play',frame)
-        #    k = cv2.waitKey(30) & 0xff
-        #    if k == 27:
-        #        break

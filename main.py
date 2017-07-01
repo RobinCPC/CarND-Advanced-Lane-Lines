@@ -156,10 +156,10 @@ def measure_curvature(leftx, rightx, y_len=720):
 
     # Calculate the radius of curvature
     y_eval = np.max(ploty)
-    print('y_eval:{}', y_eval)
+    #print('y_eval:{}', y_eval)
     left_curverad = ((1 + (2*left_fit[0]*y_eval + left_fit[1])**2)**1.5) / np.absolute(2*left_fit[0])
     right_curverad = ((1 + (2*right_fit[0]*y_eval + right_fit[1])**2)**1.5) / np.absolute(2*right_fit[0])
-    print(left_curverad, right_curverad)
+    #print(left_curverad, right_curverad)
 
 
     # Define conversions in x and y from pixels space to meters
@@ -170,12 +170,12 @@ def measure_curvature(leftx, rightx, y_len=720):
     left_fit_cr = np.polyfit(leftx[:,0]*ym_per_pix, leftx[:,1]*xm_per_pix, 2)
     right_fit_cr = np.polyfit(rightx[:,0]*ym_per_pix, rightx[:,1]*xm_per_pix, 2)
     # Calculate the new radii of curvature
-    left_curverad = ((1 + (2*left_fit_cr[0]*y_eval*ym_per_pix + left_fit_cr[1])**2)**1.5) / np.absolute(2*left_fit_cr[0])
-    right_curverad = ((1 + (2*right_fit_cr[0]*y_eval*ym_per_pix + right_fit_cr[1])**2)**1.5) / np.absolute(2*right_fit_cr[0])
+    left_curverad = ((1 + (2*left_fit_cr[0]*y_eval*ym_per_pix + left_fit_cr[1])**2)**1.5) / (2*left_fit_cr[0]) #np.absolute(2*left_fit_cr[0])
+    right_curverad = ((1 + (2*right_fit_cr[0]*y_eval*ym_per_pix + right_fit_cr[1])**2)**1.5) / (2*right_fit_cr[0]) #np.absolute(2*right_fit_cr[0])
     # Now our radius of curvature is in meters
-    print(left_curverad, 'm', right_curverad, 'm')
+    #print(left_curverad, 'm', right_curverad, 'm')
 
-    return left_fitx, right_fitx, left_curverad, right_curverad
+    return left_fit, right_fit, left_fitx, right_fitx, left_curverad, right_curverad
 
 
 def visualize_output(undist, warped, Minv, left_fitx, right_fitx, ploty, ave_curv, base_pos):
@@ -191,11 +191,12 @@ def visualize_output(undist, warped, Minv, left_fitx, right_fitx, ploty, ave_cur
     cv2.fillPoly(color_warp, np.int_([pts]), (0,255, 0))
 
     # Warp the blank back to original image space using inverse perspective matrix (Minv)
+    img_size = (undist.shape[1], undist.shape[0])
     newwarp = cv2.warpPerspective(color_warp, Minv, img_size)
     # Combine the result with the original image
     result = cv2.addWeighted(undist, 1, newwarp, 0.3, 0)
     # put text on image
-    curv_str = 'Radius of Curvature = {:.3f}(m)'.format(ave_curv)
+    curv_str = 'Radius of Curvature = {:.2f}(km)'.format(np.abs(ave_curv/1000.))
     pos_str = ''
     if base_pos <= 0:
         pos_str = 'Vehicle is {:.3f}m left of center'.format(abs(base_pos))
@@ -207,6 +208,10 @@ def visualize_output(undist, warped, Minv, left_fitx, right_fitx, ploty, ave_cur
     return result
 
 
+def pick_curv(left, right):
+    temp = np.array((left, right))
+    ind = np.argmin(abs(temp - 1000.))
+    return temp[ind]
 if __name__ == '__main__':
     args = parse_arg(sys.argv)
     if int(args.calibrate) == 1:
@@ -220,6 +225,8 @@ if __name__ == '__main__':
         # add matrix for perspective transform
         M, Minv = warped()
 
+        left_fit, right_fit = None, None
+
         # read images and processing
         test_images = glob.glob('./test_images/test5.jpg')
         for ind, fn in enumerate(test_images):
@@ -231,13 +238,19 @@ if __name__ == '__main__':
             undist = cv2.GaussianBlur(undist, (3,3), 0)
 
             # color/grdient threshold
-            thresh_bin = thresh_pipeline(undist, s_thresh=(190, 250), sx_thresh=(20, 100))
+            thresh_bin = thresh_pipeline(undist, s_thresh=(200, 250), sx_thresh=(20, 100))
 
             # Perspective transform to get bird-eyes view
             warped = cv2.warpPerspective(thresh_bin, M, img_size, flags=cv2.INTER_LINEAR)
 
             # find lane by sliding window
-            lane_img, leftx, rightx = sliding_window_search(warped*255)
+            #lane_img, leftx, rightx = sliding_window_search(warped*255)
+            if left_fit is None or right_fit is None:
+                lane_img, leftx, rightx = sliding_window_search(warped*255)
+                print(lane_img.shape)
+            else:
+                lane_img, leftx, rightx = filter_search(warped*255, left_fit, right_fit)
+                print(lane_img.shape)
 
             plt.subplot(221), plt.imshow(undist[:,:,::-1])
             plt.subplot(222), plt.imshow(thresh_bin, cmap='gray')
@@ -258,10 +271,23 @@ if __name__ == '__main__':
 
 
             # Measure curvature (wrap into a funtion)
-            left_fitx, right_fitx, left_curverad, right_curverad = measure_curvature(leftx, rightx, y_len=img_size[1])
+            out_group = measure_curvature(leftx, rightx, y_len=img_size[1])
+            left_fit, right_fit, left_fitx, right_fitx, left_curverad, right_curverad = out_group
 
-            ave_curv = (left_curverad + right_curverad) / 2.0                  # unit: m
-            base_pos = ((right_fitx[-1] + left_fitx[-1])/2. - 640) * (3.7/700) # unit: m
+            # pick suitable curvature
+            b_left, b_right = 0, 0
+            suit_curv = 0
+            #suit_curv = (left_curverad + right_curverad) / 2.0              # unit: m
+            suit_curv = pick_curv(left_curverad, right_curverad)            # unit: m
+            #if left_curverad < 2000 or left_curverad >= 600:
+            #    b_left = 1
+            #if right_curverad < 2000 or right_curverad >= 600:
+            #    b_right = 1
+            #if b_left == 0 and b_right == 0:
+            #    suit_curv = (left_curverad + right_curverad) / 2.0              # unit: m
+            #elif b_left == 1 and b_right == 1:
+            #    if abs(left)
+            base_pos = ((right_fitx[-1] + left_fitx[-1])/2. - 640) * (3.7/700)  # unit: m
             ploty = np.linspace(0, img_size[1]-1, num=img_size[1])# to cover same y-range as image
 
 
@@ -279,7 +305,7 @@ if __name__ == '__main__':
 
 
             # Create an image to draw the lines on
-            result = visualize_output(undist, warped, Minv, left_fitx, right_fitx, ploty, ave_curv, base_pos)
+            result = visualize_output(undist, warped, Minv, left_fitx, right_fitx, ploty, suit_curv, base_pos)
             #cv2.imshow('result', result)
             #cv2.waitKey(2000)
             cv2.imwrite('result.png', result)

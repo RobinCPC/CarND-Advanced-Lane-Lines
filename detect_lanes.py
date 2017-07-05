@@ -3,7 +3,7 @@ module for detecting lanes
 '''
 import cv2
 import numpy as np
-#import mtplotlib.pyplot as plt
+import matplotlib.pyplot as plt
 
 
 # Define a class to receive the characteristics of each line detection

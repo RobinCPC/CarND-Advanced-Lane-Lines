@@ -61,8 +61,6 @@ def calib(fold='./camera_cal/', nx=9, ny=6):
 
             # Draw and display the corners
             cv2.drawChessboardCorners(img, (nx, ny), corners, ret)
-            #write_name = 'corners_found'+str(ind)+'.jpg'
-            #cv2.imwrite(write_name, img)
             #cv2.imshow('img', img)
             #cv2.waitKey(500)
 
@@ -77,8 +75,6 @@ def calib(fold='./camera_cal/', nx=9, ny=6):
 
     dst = cv2.undistort(img, mtx, dist, None, mtx)
     cv2.imwrite('./output_images/test_undist2.jpg', dst)
-    #cv2.imshow('undistortion', dst)
-    #cv2.waitKey()
 
     # Save the camera calibration result for later use (we won't worry about rvecs/tvecs)
     dist_pickle = {}
@@ -108,7 +104,7 @@ def thresh_pipeline(img, s_thresh=(180, 250), sx_thresh=(20, 100)):
     # Sobel x
     gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
     sobelx = cv2.Sobel(gray, cv2.CV_64F, 1, 0) # Take the derivative in x
-    #sobelx = cv2.Sobel(l_channel, cv2.CV_64F, 1, 0) # TODO: why use l_channel Take the derivative in x
+    #sobelx = cv2.Sobel(l_channel, cv2.CV_64F, 1, 0)
     abs_sobelx = np.absolute(sobelx) # Absolute x derivative to accentuate lines away from horizontal
     scaled_sobel = np.uint8(255*abs_sobelx/np.max(abs_sobelx))
 
@@ -131,7 +127,7 @@ def thresh_pipeline(img, s_thresh=(180, 250), sx_thresh=(20, 100)):
 
 
 # Perspective transform
-def warped():
+def get_warped():
     '''
     return Perspective matrix
     Currently, The points for perspective are chosed manually.
@@ -154,17 +150,14 @@ def measure_curvature(leftx, rightx, y_len=720):
     '''
     # Fit a second order polynomial to pixel positions in each fake lane line
     ploty = np.linspace(0, y_len-1, num=y_len)# to cover same y-range as image
-    #left_fit = np.polyfit(ploty, leftx, 2)
     left_fit = np.polyfit(leftx[:,0], leftx[:,1], 2)
     left_fitx = left_fit[0]*ploty**2 + left_fit[1]*ploty + left_fit[2]
-    #right_fit = np.polyfit(ploty, rightx, 2)
     right_fit = np.polyfit(rightx[:,0], rightx[:,1], 2)
     right_fitx = right_fit[0]*ploty**2 + right_fit[1]*ploty + right_fit[2]
 
 
     # Calculate the radius of curvature
     y_eval = np.max(ploty)
-    #print('y_eval:{}', y_eval)
     left_curverad = ((1 + (2*left_fit[0]*y_eval + left_fit[1])**2)**1.5) / np.absolute(2*left_fit[0])
     right_curverad = ((1 + (2*right_fit[0]*y_eval + right_fit[1])**2)**1.5) / np.absolute(2*right_fit[0])
     #print(left_curverad, right_curverad)
@@ -263,6 +256,10 @@ def visualize_output(undist, warped, Minv, left_fitx, right_fitx, left_curverad,
 
 
 def pick_curv(left, right):
+    '''
+    Pick the curvature between left and right lane
+    (not use in current pipeline)
+    '''
     temp = np.array((left, right))
     ind = np.argmin(abs(temp - 1000.))
     return temp[ind]
@@ -277,18 +274,17 @@ def check_sanity(left_fitx, right_fitx, left_curverad, right_curverad):
     head_dist = (right_fitx[-1] - left_fitx[-1]) * (3.7/700)  # unit: m
     tail_dist = (right_fitx[0] - left_fitx[0]) * (3.7/700)  # unit: m
 
+    # check if left and right lane are roughly parallel
     if head_dist < 2.6 or head_dist > 3.5:
         fail_rate += 1
     if tail_dist < 2.6 or tail_dist > 3.5:
         fail_rate += 1
 
+    # check if curvatures are reasonable (not too small)
     if np.abs(left_curverad)/1000. < 0.4 or np.abs(right_curverad)/1000. < 0.4:
         fail_rate += 1
     return fail_rate
 
-
-global left_fit
-global right_fit
 
 def do_processing(mtx, dist, M, Minv):
     '''
@@ -302,12 +298,6 @@ def do_processing(mtx, dist, M, Minv):
     def process_image(image):
         '''
         main pipeline to process each frame of video
-        TODO:
-            * check sanity
-            * use average curvature to draw
-            * check distance of two line at head and tail
-            * check if have very opposite curvature
-            * switch to filter search or use previous frame result
         '''
         # read image
         img = np.copy(image)
@@ -389,24 +379,36 @@ def do_processing(mtx, dist, M, Minv):
     return process_image
 
 
+# Declare a global Line class object to store useful parameter to check the
+# sanity between each frame of images
 global line_l, line_r
 line_l = Line()
 line_r = Line()
+global left_fit
+global right_fit
+
 
 if __name__ == '__main__':
     args = parse_arg(sys.argv)
     if int(args.calibrate) == 1:
+        '''
+        Do calibration with images in camera_cal
+        '''
         calib()
 
     elif int(args.video) == 1:
+        '''
+        Use pipeline to detect lane line on video
+        '''
         # load camera parametes (mtx, dist)
         mtx, dist = [] ,[]
         with open('./camera_cal/wide_dist_pickle.p', 'rb') as f:
             data = pickle.load(f)
             mtx, dist = data['mtx'], data['dist']
         # add matrix for perspective transform
-        M, Minv = warped()
+        M, Minv = get_warped()
 
+        # read file name from cli parameters
         fn = args.file
 
         project_output = './output_images/project.mp4'
@@ -415,13 +417,16 @@ if __name__ == '__main__':
         white_clip.write_videofile(project_output, audio=False)
 
     else:
+        '''
+        Test pipeline on images in test_images dir
+        '''
         # load camera parametes (mtx, dist)
         mtx, dist = [] ,[]
         with open('./camera_cal/wide_dist_pickle.p', 'rb') as f:
             data = pickle.load(f)
             mtx, dist = data['mtx'], data['dist']
         # add matrix for perspective transform
-        M, Minv = warped()
+        M, Minv = get_warped()
 
         left_fit, right_fit = None, None
 
@@ -441,7 +446,7 @@ if __name__ == '__main__':
             # Perspective transform to get bird-eyes view
             warped = cv2.warpPerspective(thresh_bin, M, img_size, flags=cv2.INTER_LINEAR)
 
-            # find lane by sliding window
+            # find lane by sliding window and filter search
             #lane_img, leftx, rightx = sliding_window_search(warped*255)
             if left_fit is None or right_fit is None:
                 lane_img, leftx, rightx = sliding_window_search(warped*255)
@@ -456,17 +461,9 @@ if __name__ == '__main__':
             plt.subplot(224), plt.imshow(lane_img)
             plt.show()
 
-            #leftx = leftx[::-1]
-            #rightx = rightx[::-1]
-            print(type(leftx))
-            print(leftx.shape)
-            #print(np.transpose(np.nonzero(leftx)))
-
+            # transform to suitable data structure for computing curvature
             leftx = np.transpose(np.nonzero(leftx))
-            print(leftx[:,0].shape)
-            print(leftx[:,1].shape)
             rightx = np.transpose(np.nonzero(rightx))
-
 
             # Measure curvature (wrap into a funtion)
             out_group = measure_curvature(leftx, rightx, y_len=img_size[1])
@@ -475,16 +472,7 @@ if __name__ == '__main__':
             # pick suitable curvature
             b_left, b_right = 0, 0
             suit_curv = 0
-            #suit_curv = (left_curverad + right_curverad) / 2.0              # unit: m
-            suit_curv = pick_curv(left_curverad, right_curverad)            # unit: m
-            #if left_curverad < 2000 or left_curverad >= 600:
-            #    b_left = 1
-            #if right_curverad < 2000 or right_curverad >= 600:
-            #    b_right = 1
-            #if b_left == 0 and b_right == 0:
-            #    suit_curv = (left_curverad + right_curverad) / 2.0              # unit: m
-            #elif b_left == 1 and b_right == 1:
-            #    if abs(left)
+            suit_curv = pick_curv(left_curverad, right_curverad)                # unit: m
             base_pos = ((right_fitx[-1] + left_fitx[-1])/2. - 640) * (3.7/700)  # unit: m
             ploty = np.linspace(0, img_size[1]-1, num=img_size[1])# to cover same y-range as image
 
@@ -502,16 +490,11 @@ if __name__ == '__main__':
             plt.show()
 
 
-            # Create an image to draw the lines on
+            # Create an image to draw the lines on undistorted image.
             result = visualize_output(undist, warped, Minv, left_fitx, right_fitx, left_curverad, right_curverad)
-            #cv2.imshow('result', result)
-            #cv2.waitKey(2000)
             cv2.imwrite('result.png', result)
             plt.imshow(result[:,:,::-1])
             plt.show()
 
-
-        print("nothing now")
-    pass
 
 

@@ -133,7 +133,7 @@ def get_warped():
     Currently, The points for perspective are chosed manually.
     '''
     src = np.float32([[584, 455], [700, 455], [1052, 675], [268, 675]])
-    dst = np.float32([[320, 0], [960, 0], [950, 720], [320, 720]])
+    dst = np.float32([[320, 0], [960, 0], [960, 720], [320, 720]])
     M = cv2.getPerspectiveTransform(src, dst)
     Minv = cv2.getPerspectiveTransform(dst, src)
     return M, Minv

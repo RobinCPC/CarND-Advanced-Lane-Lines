@@ -83,7 +83,7 @@ The code for my perspective transform includes a function called `get_warped()`,
 
 ```python
 src = np.float32([[584, 455], [700, 455], [1052, 675], [268, 675]])
-dst = np.float32([[320, 0], [960, 0], [950, 720], [320, 720]])
+dst = np.float32([[320, 0], [960, 0], [960, 720], [320, 720]])
 ```
 
 This resulted in the following source and destination points:
@@ -135,7 +135,7 @@ Because of quality of each frame or evironment changes in each frame, `sliding_w
 For robust and avoiding the visualization of detect lines jump around from frame to frame, I use objects of `Line` class, in `detect_line.py`, to storage curvatures each frame of both lines, and use average curvature to draw lane line in output images. `Line` object is also useful to record other information for checking sanity.
 
 #### 4. Provide a link to your final video output.
-Here's a [link to my video result](./output_images/project_output.mp4)
+Here's a [link to my video result](https://nbviewer.jupyter.org/github/RobinCPC/CarND-Advanced-Lane-Lines/blob/master/project_output.ipynb)
 
 ---
 

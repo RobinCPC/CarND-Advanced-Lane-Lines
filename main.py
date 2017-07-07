@@ -225,12 +225,12 @@ def visualize_output(undist, warped, Minv, left_fitx, right_fitx, left_curverad,
     # Combine the result with the original image
     result = cv2.addWeighted(undist, 1, newwarp, 0.3, 0)
     # put text on image and pick suitable curvature
-    b_left, b_right = 0, 0
-    suit_curv = 0
-    suit_curv = pick_curv(left_curverad, right_curverad)            # unit: m
-    base_pos = ((right_fitx[-1] + left_fitx[-1])/2. - 640) * (3.7/700)  # unit: m
-    head_dist = (right_fitx[-1] - left_fitx[-1]) * (3.7/700)  # unit: m
-    tail_dist = (right_fitx[0] - left_fitx[0]) * (3.7/700)  # unit: m
+    mid_car = 640.0         # middle point of car dashboard
+    xm_per_pix = 3.7/700    # meters per pixel in x dimension
+    #suit_curv = pick_curv(left_curverad, right_curverad)                    # unit: m
+    base_pos = ((right_fitx[-1] + left_fitx[-1])/2. - mid_car) * xm_per_pix # unit: m
+    head_dist = (right_fitx[-1] - left_fitx[-1]) * xm_per_pix               # unit: m
+    tail_dist = (right_fitx[0] - left_fitx[0]) * xm_per_pix                 # unit: m
 
 
     left_str = 'Radius of left lane = {:.2f}(km)'.format(left_curverad/1000.)
@@ -470,10 +470,10 @@ if __name__ == '__main__':
             left_fit, right_fit, left_fitx, right_fitx, left_curverad, right_curverad = out_group
 
             # pick suitable curvature
-            b_left, b_right = 0, 0
-            suit_curv = 0
-            suit_curv = pick_curv(left_curverad, right_curverad)                # unit: m
-            base_pos = ((right_fitx[-1] + left_fitx[-1])/2. - 640) * (3.7/700)  # unit: m
+            mid_car = 640.0         # middle point of car dashboard
+            xm_per_pix = 3.7/700    # meters per pixel in x dimension
+            #suit_curv = pick_curv(left_curverad, right_curverad)                        # unit: m
+            base_pos = ((right_fitx[-1] + left_fitx[-1])/2. - mid_car) * xm_per_pix     # unit: m
             ploty = np.linspace(0, img_size[1]-1, num=img_size[1])# to cover same y-range as image
 
 

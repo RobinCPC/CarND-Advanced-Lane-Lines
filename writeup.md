@@ -13,14 +13,16 @@
 
 [//]: # (Image References)
 
-[image1]: ./output_images/undistorted_images.png "Undistorted"
-[image2]: ./output_images/undistorted_example1.png "Road Transformed"
-[image3]: ./output_images/binary_example1.png "Binary Example"
-[image4]: ./output_images/warped_images.png "Warp Example"
-[image5]: ./output_images/visualized_result.png "Output"
-[image6]: ./output_images/threshold_gui.png "Threshold GUI"
-[image7]: ./output_images/detect_example.png "Detect Visual"
-[video1]: ./output_images/project_output.mp4 "Video"
+[image1]: ./output_images/undistorted_images.png   " Undistorted      "
+[image2]: ./output_images/undistorted_example1.png " Road Transformed "
+[image3]: ./output_images/binary_example1.png      " Binary Example   "
+[image4]: ./output_images/warped_images.png        " Warp Example     "
+[image5]: ./output_images/visualized_result.png    " Output           "
+[image6]: ./output_images/threshold_gui.png        " Threshold GUI    "
+[image7]: ./output_images/detect_example.png       " Detect Visual    "
+[image8]: ./output_images/fail_example1.png        " Fail Detection1  "
+[image9]: ./output_images/fail_example2.png        " Fail Detection2  "
+[video1]: ./output_images/project_output.mp4       " Video            "
 
 ## [Rubric](https://review.udacity.com/#!/rubrics/571/view) Points
 ## [Source Code](https://github.com/RobinCPC/CarND-Advanced-Lane-Lines)
@@ -110,7 +112,9 @@ After I create the threshold binary image and transform it to bird-eyes (top) vi
 After detecting lane lines in each image, I use `measure_curvature()` function in lines #146 through #180 in `main.py` to computer the curvature of left and right lanes. To computer the position of the vehicle with respect to center of lane line, I use following codes:
 
 ```python
-base_pos = ((right_fitx[-1] + left_fitx[-1])/2. - 640) * (3.7/700)  # unit: m
+mid_car = 640.0         # middle point of car dashboard
+xm_per_pix = 3.7/700    # meters per pixel in x dimension
+base_pos = ((right_fitx[-1] + left_fitx[-1])/2. - mid_car) * xm_per_pix     # unit: m
 ```
 
 `right_fitx[-1]` is the closest point to dashboard in the polynomial line of right lane, and `left_fitx[-1]` is the closest point of the left lane. Therefore, in the above code, I compute the middle point of two lane line and comapre with center of camera, at 640 pixel, and times `3.7/700`, the scale to map pixel back to meter.
@@ -144,3 +148,29 @@ Here's a [link to my video result](https://nbviewer.jupyter.org/github/RobinCPC/
 #### 1. Briefly discuss any problems / issues you faced in your implementation of this project.  Where will your pipeline likely fail?  What could you do to make it more robust?
 
 Before I check sanity of the result of lane lines, my pipeline of processing video will fail when passing through the shadow of trees (21-25 sec, and 39-42 sec) and a black car passing (27-32 sec). Threfore, I use `check_sanity()` to get rid of bad detection.
+
+#### 2. What could be improved about the algorithm/pipeline?
+
+I believe `sliding_window_search()` still could be imporved. When sliding_window_search do convolute with mask and can not detect anything (which means whole search section are black), it will output the center area of search section. From below figure, we could see that the forth section of right detected lane output the center position, but there is no bright pixel overlap in that section.
+
+![alt text][image8]
+
+To imporve sliding window search, from below code segment, we could add a check function before appending l_center/r_center into window_centroids. If there is no bright pixel overlap in ouput detected area, we should append previous l_center/r_center (not the center area of search section).
+
+```python
+# Sum quarter bottom of image to get slice, could use a different ratio
+l_sum = np.sum(warped[int(3*warped.shape[0]/4):,:int(warped.shape[1]/2)], axis=0)
+l_center = np.argmax(np.convolve(window,l_sum))-window_width/2
+r_sum = np.sum(warped[int(3*warped.shape[0]/4):,int(warped.shape[1]/2):], axis=0)
+r_center = np.argmax(np.convolve(window,r_sum))-window_width/2+int(warped.shape[1]/2)
+
+# Add what we found for the first layer
+window_centroids.append((l_center,r_center))
+```
+
+#### 3. What hypothetical cases would cause the pipeline to fail?
+
+When there is a sharp turned road and very bright environment as below figure (such as 41 second in harder_challenge_video.mp4), the recording image are very hard for pipeline to process. Also, from the above code snippet, slide window search will split image in half and do searching. but the sharp-turned lane cross the middle point of image.
+
+![alt text][image9]
+

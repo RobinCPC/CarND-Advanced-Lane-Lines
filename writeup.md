@@ -13,23 +13,35 @@
 
 [//]: # (Image References)
 
-[image1]: ./examples/undistort_output.png "Undistorted"
-[image2]: ./test_images/test1.jpg "Road Transformed"
-[image3]: ./examples/binary_combo_example.jpg "Binary Example"
-[image4]: ./examples/warped_straight_lines.jpg "Warp Example"
-[image5]: ./examples/color_fit_lines.jpg "Fit Visual"
-[image6]: ./examples/example_output.jpg "Output"
-[video1]: ./project_video.mp4 "Video"
+[image1]: ./output_images/undistorted_images.png "Undistorted"
+[image2]: ./output_images/undistorted_example1.png "Road Transformed"
+[image3]: ./output_images/binary_example1.png "Binary Example"
+[image4]: ./output_images/warped_images.png "Warp Example"
+[image5]: ./output_images/visualized_result.png "Output"
+[image6]: ./output_images/threshold_gui.png "Threshold GUI"
+[image7]: ./output_images/detect_example.png "Detect Visual"
+[video1]: ./output_images/project_output.mp4 "Video"
 
 ## [Rubric](https://review.udacity.com/#!/rubrics/571/view) Points
+## [Source Code](https://github.com/RobinCPC/CarND-Advanced-Lane-Lines)
 
-### Here I will consider the rubric points individually and describe how I addressed each point in my implementation.  
+How to use:
+
+    For Calibration, please run :
+        python main.py -c 1
+    For testing pipeline, please run:
+        python main.py
+    For detecting lane lines in video, please run:
+        python main.py -v 1
+    Pleae type `python main.py --help`, for more detail.
+
+### Here I will consider the rubric points individually and describe how I addressed each point in my implementation.
 
 ---
 
 ### Writeup / README
 
-#### 1. Provide a Writeup / README that includes all the rubric points and how you addressed each one.  You can submit your writeup as markdown or pdf.  [Here](https://github.com/udacity/CarND-Advanced-Lane-Lines/blob/master/writeup_template.md) is a template writeup for this project you can use as a guide and a starting point.  
+#### 1. Provide a Writeup / README that includes all the rubric points and how you addressed each one.  You can submit your writeup as markdown or pdf.
 
 You're reading it!
 
@@ -37,11 +49,11 @@ You're reading it!
 
 #### 1. Briefly state how you computed the camera matrix and distortion coefficients. Provide an example of a distortion corrected calibration image.
 
-The code for this step is contained in the first code cell of the IPython notebook located in "./examples/example.ipynb" (or in lines # through # of the file called `some_file.py`).  
+The code for this step is contained in lines #34 through #92 of the file called `main.py`.
 
-I start by preparing "object points", which will be the (x, y, z) coordinates of the chessboard corners in the world. Here I am assuming the chessboard is fixed on the (x, y) plane at z=0, such that the object points are the same for each calibration image.  Thus, `objp` is just a replicated array of coordinates, and `objpoints` will be appended with a copy of it every time I successfully detect all chessboard corners in a test image.  `imgpoints` will be appended with the (x, y) pixel position of each of the corners in the image plane with each successful chessboard detection.  
+I start by preparing "object points", which will be the (x, y, z) coordinates of the chessboard corners in the world. Here I am assuming the chessboard is fixed on the (x, y) plane at z=0, such that the object points are the same for each calibration image.  Thus, `objp` is just a replicated array of coordinates, and `objpoints` will be appended with a copy of it every time I successfully detect all chessboard corners in a test image.  `imgpoints` will be appended with the (x, y) pixel position of each of the corners in the image plane with each successful chessboard detection. Then, I use python module `pickle` to save these parameters in `camera_cal/wide_dist_pickle.p`.
 
-I then used the output `objpoints` and `imgpoints` to compute the camera calibration and distortion coefficients using the `cv2.calibrateCamera()` function.  I applied this distortion correction to the test image using the `cv2.undistort()` function and obtained this result: 
+I then used the output `objpoints` and `imgpoints` to compute the camera intrinsic matrix and distortion coefficients using the `cv2.calibrateCamera()` function.  I applied this distortion correction to the test image using the `cv2.undistort()` function and obtained this result:
 
 ![alt text][image1]
 
@@ -49,40 +61,39 @@ I then used the output `objpoints` and `imgpoints` to compute the camera calibra
 
 #### 1. Provide an example of a distortion-corrected image.
 
-To demonstrate this step, I will describe how I apply the distortion correction to one of the test images like this one:
+I use load `./camera_cal/wide_dist_pickle.p` to get the parameters of calibration and use `cv2.undistort()` function to get the distortion-corrected image (as below):
+
 ![alt text][image2]
+
+From above image, we can tell that the bottom of images have obvious difference. The dashboard in the left image (distorted) get smaller in the right image (undistorted).
 
 #### 2. Describe how (and identify where in your code) you used color transforms, gradients or other methods to create a thresholded binary image.  Provide an example of a binary image result.
 
-I used a combination of color and gradient thresholds to generate a binary image (thresholding steps at lines # through # in `another_file.py`).  Here's an example of my output for this step.  (note: this is not actually from one of the test images)
+I used a combination of color and gradient thresholds to generate a binary image (thresholding steps at lines #95 through #126 in `main.py`).  Here's an example of my output for this step.
 
 ![alt text][image3]
 
+In addition, in order to tune thresholds of color & gradient more easily, I create a GUI (a file called `threshold_tuning.py`) to tune thresholds with slide bars and I could see the result immediately (as below figure). The GUI help me find the suitable thresholds (For Color `S` channel: 60 to 250; for Gradient `sobel_x`: 30 to 60).
+
+![alt text][image6]
+
 #### 3. Describe how (and identify where in your code) you performed a perspective transform and provide an example of a transformed image.
 
-The code for my perspective transform includes a function called `warper()`, which appears in lines 1 through 8 in the file `example.py` (output_images/examples/example.py) (or, for example, in the 3rd code cell of the IPython notebook).  The `warper()` function takes as inputs an image (`img`), as well as source (`src`) and destination (`dst`) points.  I chose the hardcode the source and destination points in the following manner:
+The code for my perspective transform includes a function called `get_warped()`, which appears in lines 130 through 139 in the file `main.py` (./main.py).  The `get_warped()` function takes source (`src`) and destination (`dst`) points as inputs to compute the perspective matrix for getting "bird-eyes view".  I chose the hardcode the source and destination points in the following manner:
 
 ```python
-src = np.float32(
-    [[(img_size[0] / 2) - 55, img_size[1] / 2 + 100],
-    [((img_size[0] / 6) - 10), img_size[1]],
-    [(img_size[0] * 5 / 6) + 60, img_size[1]],
-    [(img_size[0] / 2 + 55), img_size[1] / 2 + 100]])
-dst = np.float32(
-    [[(img_size[0] / 4), 0],
-    [(img_size[0] / 4), img_size[1]],
-    [(img_size[0] * 3 / 4), img_size[1]],
-    [(img_size[0] * 3 / 4), 0]])
+src = np.float32([[584, 455], [700, 455], [1052, 675], [268, 675]])
+dst = np.float32([[320, 0], [960, 0], [950, 720], [320, 720]])
 ```
 
 This resulted in the following source and destination points:
 
-| Source        | Destination   | 
-|:-------------:|:-------------:| 
-| 585, 460      | 320, 0        | 
-| 203, 720      | 320, 720      |
-| 1127, 720     | 960, 720      |
-| 695, 460      | 960, 0        |
+| Source          | Destination     |
+| :-------------: | :-------------: |
+| 584  , 455      | 320 , 0         |
+| 700  , 455      | 960 , 0         |
+| 1052 , 675      | 960 , 720       |
+| 268  , 675      | 320 , 720       |
 
 I verified that my perspective transform was working as expected by drawing the `src` and `dst` points onto a test image and its warped counterpart to verify that the lines appear parallel in the warped image.
 
@@ -90,27 +101,41 @@ I verified that my perspective transform was working as expected by drawing the 
 
 #### 4. Describe how (and identify where in your code) you identified lane-line pixels and fit their positions with a polynomial?
 
-Then I did some other stuff and fit my lane lines with a 2nd order polynomial kinda like this:
+After I create the threshold binary image and transform it to bird-eyes (top) view, I use a function called `sliding_window_search()` and `filter_search()`,which appears in lines 34 through 106 in the file `detect_lanes.py` (./detect_lanes.py), to detect the lane lines in each image (as show in bottom right of the below figure).
 
-![alt text][image5]
+![alt text][image7]
 
 #### 5. Describe how (and identify where in your code) you calculated the radius of curvature of the lane and the position of the vehicle with respect to center.
 
-I did this in lines # through # in my code in `my_other_file.py`
+After detecting lane lines in each image, I use `measure_curvature()` function in lines #146 through #180 in `main.py` to computer the curvature of left and right lanes. To computer the position of the vehicle with respect to center of lane line, I use following codes:
+
+```python
+base_pos = ((right_fitx[-1] + left_fitx[-1])/2. - 640) * (3.7/700)  # unit: m
+```
+
+`right_fitx[-1]` is the closest point to dashboard in the polynomial line of right lane, and `left_fitx[-1]` is the closest point of the left lane. Therefore, in the above code, I compute the middle point of two lane line and comapre with center of camera, at 640 pixel, and times `3.7/700`, the scale to map pixel back to meter.
 
 #### 6. Provide an example image of your result plotted back down onto the road such that the lane area is identified clearly.
 
-I implemented this step in lines # through # in my code in `yet_another_file.py` in the function `map_lane()`.  Here is an example of my result on a test image:
+After getting the polynomial equation of both lane line, I implemented the visualization in lines #205 through #255 in my code in `main.py` in the function `visualize_output()`.  Here is an example of my result on a test image:
 
-![alt text][image6]
+![alt text][image5]
 
 ---
 
 ### Pipeline (video)
 
-#### 1. Provide a link to your final video output.  Your pipeline should perform reasonably well on the entire project video (wobbly lines are ok but no catastrophic failures that would cause the car to drive off the road!).
+#### 1. Building pipeline of video for processing each frame.
+For this step, I use `VideoFileClip()` function from moviepy library, in lines #400 to lines #417 in `main.py`, to execute my pipeline on each frame.
 
-Here's a [link to my video result](./project_video.mp4)
+#### 2. Sanity Check.
+Because of quality of each frame or evironment changes in each frame, `sliding_window_search` function may detect the wrong lane line (such as two line are not roughly parallel). Therefore, I use `check_sanity` function, in lines #268 to #286 in `main.py`, to check if two line are roughly parallel or have suitable curvature. If `check_sanity` return the result is not correct, and I will use `filter_search()` functioni, to detect lane lines again. `filter_search()` use previous detected result, from previous frame, to only search possible area in the image. The whole flow of sanity-checked is in lines #339 to lines #373 in `main.py`.
+
+#### 3. Smoothing
+For robust and avoiding the visualization of detect lines jump around from frame to frame, I use objects of `Line` class, in `detect_line.py`, to storage curvatures each frame of both lines, and use average curvature to draw lane line in output images. `Line` object is also useful to record other information for checking sanity.
+
+#### 4. Provide a link to your final video output.
+Here's a [link to my video result](./output_images/project_output.mp4)
 
 ---
 
@@ -118,4 +143,4 @@ Here's a [link to my video result](./project_video.mp4)
 
 #### 1. Briefly discuss any problems / issues you faced in your implementation of this project.  Where will your pipeline likely fail?  What could you do to make it more robust?
 
-Here I'll talk about the approach I took, what techniques I used, what worked and why, where the pipeline might fail and how I might improve it if I were going to pursue this project further.  
+Before I check sanity of the result of lane lines, my pipeline of processing video will fail when passing through the shadow of trees (21-25 sec, and 39-42 sec) and a black car passing (27-32 sec). Threfore, I use `check_sanity()` to get rid of bad detection.

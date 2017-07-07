@@ -64,6 +64,48 @@ def sliding_window_search(img, window_width=50, window_height=80, margin=100):
     return output, l_points, r_points
 
 
+def filter_search(img, left_fit, right_fit):
+    '''
+    Assume you now have a new warped binary image
+    from the next frame of video (also called "img")
+    It's now much easier to find line pixels!
+    '''
+    nonzero = img.nonzero()
+    nonzeroy = np.array(nonzero[0])
+    nonzerox = np.array(nonzero[1])
+    margin = 100
+    left_lane_inds = ((nonzerox > (left_fit[0]*(nonzeroy**2) + left_fit[1]*nonzeroy + left_fit[2] - margin)) & (nonzerox < (left_fit[0]*(nonzeroy**2) + left_fit[1]*nonzeroy + left_fit[2] + margin)))
+    right_lane_inds = ((nonzerox > (right_fit[0]*(nonzeroy**2) + right_fit[1]*nonzeroy + right_fit[2] - margin)) & (nonzerox < (right_fit[0]*(nonzeroy**2) + right_fit[1]*nonzeroy + right_fit[2] + margin)))
+
+    # Again, extract left and right line pixel positions
+    leftx = nonzerox[left_lane_inds]
+    lefty = nonzeroy[left_lane_inds]
+    rightx = nonzerox[right_lane_inds]
+    righty = nonzeroy[right_lane_inds]
+    # Fit a second order polynomial to each
+    left_fit = np.polyfit(lefty, leftx, 2)
+    right_fit = np.polyfit(righty, rightx, 2)
+    # Generate x and y values for plotting
+    ploty = np.linspace(0, img.shape[0]-1, img.shape[0] )
+    left_fitx = left_fit[0]*ploty**2 + left_fit[1]*ploty + left_fit[2]
+    right_fitx = right_fit[0]*ploty**2 + right_fit[1]*ploty + right_fit[2]
+
+    # Draw the results
+    l_points = np.zeros_like(img)
+    r_points = np.zeros_like(img)
+    l_points[(lefty, leftx)] = 255
+    r_points[(righty, rightx)] = 255
+    template = np.array(r_points + l_points, np.uint8) # add both left and right window pixels togther
+    #l_template = np.array(l_points, np.uint8) # add both left and right window pixels togther
+    #r_template = np.array(r_points, np.uint8) # add both left and right window pixels togther
+    zero_channel = np.zeros_like(template) # create a zero color channel
+    template = np.array(cv2.merge((zero_channel,template,zero_channel)),np.uint8) # make window pixels green
+    #template = np.array(cv2.merge((l_template,zero_channel, r_template)),np.uint8) # make window pixels green
+    warpage = np.array(cv2.merge((img,img,img)),np.uint8) # making the original road pixels 3 color channels
+    output = cv2.addWeighted(warpage, 0.5, template, 0.5, 0.0) # overlay the orignal road image with window results
+    return output, l_points, r_points
+
+
 def window_mask(width, height, img_ref, center,level):
     output = np.zeros_like(img_ref)
     output[int(img_ref.shape[0]-(level+1)*height):int(img_ref.shape[0]-level*height),max(0,int(center-width/2)):min(int(center+width/2),img_ref.shape[1])] = 1
@@ -71,7 +113,6 @@ def window_mask(width, height, img_ref, center,level):
 
 
 def find_window_centroids(warped, window_width, window_height, margin):
-
     window_centroids = [] # Store the (left,right) window centroid positions per level
     window = np.ones(window_width) # Create our window template that we will use for convolutions
 
@@ -107,41 +148,3 @@ def find_window_centroids(warped, window_width, window_height, margin):
 
     return window_centroids
 
-def filter_search(img, left_fit, right_fit):
-    # Assume you now have a new warped binary image
-    # from the next frame of video (also called "img")
-    # It's now much easier to find line pixels!
-    nonzero = img.nonzero()
-    nonzeroy = np.array(nonzero[0])
-    nonzerox = np.array(nonzero[1])
-    margin = 100
-    left_lane_inds = ((nonzerox > (left_fit[0]*(nonzeroy**2) + left_fit[1]*nonzeroy + left_fit[2] - margin)) & (nonzerox < (left_fit[0]*(nonzeroy**2) + left_fit[1]*nonzeroy + left_fit[2] + margin)))
-    right_lane_inds = ((nonzerox > (right_fit[0]*(nonzeroy**2) + right_fit[1]*nonzeroy + right_fit[2] - margin)) & (nonzerox < (right_fit[0]*(nonzeroy**2) + right_fit[1]*nonzeroy + right_fit[2] + margin)))
-
-    # Again, extract left and right line pixel positions
-    leftx = nonzerox[left_lane_inds]
-    lefty = nonzeroy[left_lane_inds]
-    rightx = nonzerox[right_lane_inds]
-    righty = nonzeroy[right_lane_inds]
-    # Fit a second order polynomial to each
-    left_fit = np.polyfit(lefty, leftx, 2)
-    right_fit = np.polyfit(righty, rightx, 2)
-    # Generate x and y values for plotting
-    ploty = np.linspace(0, img.shape[0]-1, img.shape[0] )
-    left_fitx = left_fit[0]*ploty**2 + left_fit[1]*ploty + left_fit[2]
-    right_fitx = right_fit[0]*ploty**2 + right_fit[1]*ploty + right_fit[2]
-
-    # Draw the results
-    l_points = np.zeros_like(img)
-    r_points = np.zeros_like(img)
-    l_points[(lefty, leftx)] = 255
-    r_points[(righty, rightx)] = 255
-    template = np.array(r_points + l_points, np.uint8) # add both left and right window pixels togther
-    #l_template = np.array(l_points, np.uint8) # add both left and right window pixels togther
-    #r_template = np.array(r_points, np.uint8) # add both left and right window pixels togther
-    zero_channel = np.zeros_like(template) # create a zero color channel
-    template = np.array(cv2.merge((zero_channel,template,zero_channel)),np.uint8) # make window pixels green
-    #template = np.array(cv2.merge((l_template,zero_channel, r_template)),np.uint8) # make window pixels green
-    warpage = np.array(cv2.merge((img,img,img)),np.uint8) # making the original road pixels 3 color channels
-    output = cv2.addWeighted(warpage, 0.5, template, 0.5, 0.0) # overlay the orignal road image with window results
-    return output, l_points, r_points

@@ -148,3 +148,189 @@ def find_window_centroids(warped, window_width, window_height, margin):
 
     return window_centroids
 
+
+# Color/gradient threshold
+def thresh_pipeline(img, s_thresh=(180, 250), sx_thresh=(20, 100)):
+    '''
+    work on undistorted image
+    '''
+    img = np.copy(img)
+    # Convert to HSV color space and separate the V channel
+    hls = cv2.cvtColor(img, cv2.COLOR_RGB2HLS).astype(np.float)
+    l_channel = hls[:,:,1]
+    s_channel = hls[:,:,2]
+    # Sobel x
+    gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
+    sobelx = cv2.Sobel(gray, cv2.CV_64F, 1, 0) # Take the derivative in x
+    #sobelx = cv2.Sobel(l_channel, cv2.CV_64F, 1, 0)
+    abs_sobelx = np.absolute(sobelx) # Absolute x derivative to accentuate lines away from horizontal
+    scaled_sobel = np.uint8(255*abs_sobelx/np.max(abs_sobelx))
+
+    # Threshold x gradient
+    sxbinary = np.zeros_like(scaled_sobel)
+    sxbinary[(scaled_sobel >= sx_thresh[0]) & (scaled_sobel <= sx_thresh[1])] = 1
+
+    # Threshold color channel
+    s_binary = np.zeros_like(s_channel)
+    s_binary[(s_channel >= s_thresh[0]) & (s_channel <= s_thresh[1])] = 1
+    # Stack each channel
+    # Note color_binary[:, :, 0] is all 0s, effectively an all black image. It might
+    # be beneficial to replace this channel with something else.
+    color_binary = np.dstack(( np.zeros_like(sxbinary), sxbinary, s_binary))
+
+    # Combine the two binary thresholds
+    combined_binary = np.zeros_like(sxbinary)
+    combined_binary[(s_binary == 1) | (sxbinary == 1)] = 1
+    return combined_binary #color_binary
+
+
+# Perspective transform
+def get_warped():
+    '''
+    return Perspective matrix
+    Currently, The points for perspective are chosed manually.
+    '''
+    src = np.float32([[584, 455], [700, 455], [1052, 675], [268, 675]])
+    dst = np.float32([[320, 0], [960, 0], [960, 720], [320, 720]])
+    M = cv2.getPerspectiveTransform(src, dst)
+    Minv = cv2.getPerspectiveTransform(dst, src)
+    return M, Minv
+
+
+# Detect lane lines
+# seperate lane detecting functions into detect_lanes.py
+
+# Determine the lane curvature
+def measure_curvature(leftx, rightx, y_len=720):
+    '''
+    From detected pixel to compute polynomial function of lane line,
+    and, then, computet the curvature and radius of lane line.
+    '''
+    # Fit a second order polynomial to pixel positions in each fake lane line
+    ploty = np.linspace(0, y_len-1, num=y_len)# to cover same y-range as image
+    left_fit = np.polyfit(leftx[:,0], leftx[:,1], 2)
+    left_fitx = left_fit[0]*ploty**2 + left_fit[1]*ploty + left_fit[2]
+    right_fit = np.polyfit(rightx[:,0], rightx[:,1], 2)
+    right_fitx = right_fit[0]*ploty**2 + right_fit[1]*ploty + right_fit[2]
+
+
+    # Calculate the radius of curvature
+    y_eval = np.max(ploty)
+    left_curverad = ((1 + (2*left_fit[0]*y_eval + left_fit[1])**2)**1.5) / np.absolute(2*left_fit[0])
+    right_curverad = ((1 + (2*right_fit[0]*y_eval + right_fit[1])**2)**1.5) / np.absolute(2*right_fit[0])
+    #print(left_curverad, right_curverad)
+
+
+    # Define conversions in x and y from pixels space to meters
+    ym_per_pix = 30/720 # meters per pixel in y dimension
+    xm_per_pix = 3.7/700 # meters per pixel in x dimension
+
+    # Fit new polynomials to x,y in world space
+    left_fit_cr = np.polyfit(leftx[:,0]*ym_per_pix, leftx[:,1]*xm_per_pix, 2)
+    right_fit_cr = np.polyfit(rightx[:,0]*ym_per_pix, rightx[:,1]*xm_per_pix, 2)
+    # Calculate the new radii of curvature
+    left_curverad = ((1 + (2*left_fit_cr[0]*y_eval*ym_per_pix + left_fit_cr[1])**2)**1.5) / (2*left_fit_cr[0]) #np.absolute(2*left_fit_cr[0])
+    right_curverad = ((1 + (2*right_fit_cr[0]*y_eval*ym_per_pix + right_fit_cr[1])**2)**1.5) / (2*right_fit_cr[0]) #np.absolute(2*right_fit_cr[0])
+    # Now our radius of curvature is in meters
+    #print(left_curverad, 'm', right_curverad, 'm')
+
+    return left_fit, right_fit, left_fitx, right_fitx, left_curverad, right_curverad
+
+
+def get_curvature(left_fit, right_fit, y_len=720):
+    '''
+    Compute curvature and radius of lane lines from polynomial eaution of lane line
+    '''
+    ploty = np.linspace(0, y_len-1, num=y_len)# to cover same y-range as image
+    left_fitx = left_fit[0]*ploty**2 + left_fit[1]*ploty + left_fit[2]
+    right_fitx = right_fit[0]*ploty**2 + right_fit[1]*ploty + right_fit[2]
+
+    # Calculate the radius of curvature
+    y_eval = np.max(ploty)
+    # Define conversions in x and y from pixels space to meters
+    ym_per_pix = 30/720 # meters per pixel in y dimension
+    xm_per_pix = 3.7/700 # meters per pixel in x dimension
+
+    # Fit new polynomials to x,y in world space
+    left_fit_cr = np.polyfit(ploty*ym_per_pix, left_fitx*xm_per_pix, 2)
+    right_fit_cr = np.polyfit(ploty*ym_per_pix, right_fitx*xm_per_pix, 2)
+    # Calculate the new radii of curvature
+    left_curverad = ((1 + (2*left_fit_cr[0]*y_eval*ym_per_pix + left_fit_cr[1])**2)**1.5) / (2*left_fit_cr[0]) #np.absolute(2*left_fit_cr[0])
+    right_curverad = ((1 + (2*right_fit_cr[0]*y_eval*ym_per_pix + right_fit_cr[1])**2)**1.5) / (2*right_fit_cr[0]) #np.absolute(2*right_fit_cr[0])
+    return left_fitx, right_fitx, left_curverad, right_curverad
+
+
+def visualize_output(undist, warped, Minv, left_fitx, right_fitx, left_curverad, right_curverad, is_sanity=0, do_filter=0):
+    '''
+    visualize detected lanes on undistorted image
+    '''
+    warp_zero = np.zeros_like(warped).astype(np.uint8)
+    color_warp = np.dstack((warp_zero, warp_zero, warp_zero))
+    img_size = (undist.shape[1], undist.shape[0])
+    ploty = np.linspace(0, img_size[1]-1, num=img_size[1])# to cover same y-range as image
+
+    # Recast the x and y points into usable format for cv2.fillPoly()
+    pts_left = np.array([np.transpose(np.vstack([left_fitx, ploty]))])
+    pts_right = np.array([np.flipud(np.transpose(np.vstack([right_fitx, ploty])))])
+    pts = np.hstack((pts_left, pts_right))
+
+    # Draw the lane onto the warped blank image
+    cv2.fillPoly(color_warp, np.int_([pts]), (0,255, 0))
+
+    # Warp the blank back to original image space using inverse perspective matrix (Minv)
+    img_size = (undist.shape[1], undist.shape[0])
+    newwarp = cv2.warpPerspective(color_warp, Minv, img_size)
+    # Combine the result with the original image
+    result = cv2.addWeighted(undist, 1, newwarp, 0.3, 0)
+    # put text on image and pick suitable curvature
+    mid_car = 640.0         # middle point of car dashboard
+    xm_per_pix = 3.7/700    # meters per pixel in x dimension
+    #suit_curv = pick_curv(left_curverad, right_curverad)                    # unit: m
+    base_pos = ((right_fitx[-1] + left_fitx[-1])/2. - mid_car) * xm_per_pix # unit: m
+    head_dist = (right_fitx[-1] - left_fitx[-1]) * xm_per_pix               # unit: m
+    tail_dist = (right_fitx[0] - left_fitx[0]) * xm_per_pix                 # unit: m
+
+
+    left_str = 'Radius of left lane = {:.2f}(km)'.format(left_curverad/1000.)
+    right_str = 'Radius of right lane = {:.2f}(km)'.format(right_curverad/1000.)
+    #curv_str = 'Radius of Curvature = {:.2f}(km)'.format(np.abs(suit_curv/1000.))
+    head_str = 'Lane width of head = {:.3f}(m)'.format(head_dist)
+    tail_str = 'Lane width of tail = {:.3f}(m)'.format(tail_dist)
+    san_str = 'filter= {}, sanity={}'.format(do_filter, is_sanity)
+    pos_str = ''
+    if base_pos <= 0:
+        pos_str = 'Vehicle is {:.3f}m left of center'.format(abs(base_pos))
+    else:
+        pos_str = 'Vehicle is {:.3f}m right of center'.format(abs(base_pos))
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    #cv2.putText(result, curv_str, (50,50), font, 2, (255,255,255), 2, cv2.LINE_AA)
+    cv2.putText(result, left_str, (450,50), font, 0.75, (255,255,255), 2, cv2.LINE_AA)
+    cv2.putText(result, right_str, (450,100), font, 0.75, (255,255,255), 2, cv2.LINE_AA)
+    cv2.putText(result, pos_str, (450, 150), font, 0.75, (255,255,255), 2, cv2.LINE_AA)
+    #cv2.putText(result, head_str, (50, 200), font, 1, (255,255,255), 2, cv2.LINE_AA)
+    #cv2.putText(result, tail_str, (50, 250), font, 1, (255,255,255), 2, cv2.LINE_AA)
+    #cv2.putText(result, san_str, (50, 350), font, 1, (255,255,255), 2, cv2.LINE_AA)
+    return result
+
+
+def check_sanity(left_fitx, right_fitx, left_curverad, right_curverad):
+    '''
+    check sanity of lane detection
+    '''
+    fail_rate = 0
+    base_pos = ((right_fitx[-1] + left_fitx[-1])/2. - 640) * (3.7/700)  # unit: m
+    head_dist = (right_fitx[-1] - left_fitx[-1]) * (3.7/700)  # unit: m
+    tail_dist = (right_fitx[0] - left_fitx[0]) * (3.7/700)  # unit: m
+
+    # check if left and right lane are roughly parallel
+    if head_dist < 2.6 or head_dist > 3.5:
+        fail_rate += 1
+    if tail_dist < 2.6 or tail_dist > 3.5:
+        fail_rate += 1
+
+    # check if curvatures are reasonable (not too small)
+    if np.abs(left_curverad)/1000. < 0.4 or np.abs(right_curverad)/1000. < 0.4:
+        fail_rate += 1
+    return fail_rate
+
+
